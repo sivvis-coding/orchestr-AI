@@ -15,8 +15,25 @@ export const projectsApi = {
   remove: (id) => api.delete(`/projects/${id}`),
 };
 
+export const documentsApi = {
+  list: (projectId) =>
+    api.get(`/projects/${projectId}/documents`).then((r) => r.data),
+  upload: (projectId, file) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api
+      .post(`/projects/${projectId}/documents`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      .then((r) => r.data);
+  },
+  remove: (projectId, docId) =>
+    api.delete(`/projects/${projectId}/documents/${docId}`),
+};
+
 export const authApi = {
-  validateKey: (data) => api.post("/auth/validate-key", data).then((r) => r.data),
+  validateKey: (data) =>
+    api.post("/auth/validate-key", data).then((r) => r.data),
 };
 
 export const chatApi = {

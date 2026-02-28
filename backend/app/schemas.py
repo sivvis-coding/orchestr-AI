@@ -5,6 +5,7 @@ from datetime import datetime
 
 # ── Project schemas ──────────────────────────────────────────────
 
+
 class ProjectBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     model: str = Field(default="gemini-2.5-flash")
@@ -34,6 +35,7 @@ class ProjectResponse(ProjectBase):
 
 # ── Auth schemas ─────────────────────────────────────────────────
 
+
 class ValidateKeyRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
     model: str = Field(default="gemini-2.5-flash")
@@ -45,6 +47,7 @@ class ValidateKeyResponse(BaseModel):
 
 
 # ── Message schemas ──────────────────────────────────────────────
+
 
 class MessageBase(BaseModel):
     role: str = Field(..., pattern="^(user|model)$")
@@ -68,3 +71,16 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     message: MessageResponse
+
+
+# ── Document schemas ─────────────────────────────────────────────
+
+
+class DocumentResponse(BaseModel):
+    id: int
+    project_id: int
+    filename: str
+    chunk_count: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

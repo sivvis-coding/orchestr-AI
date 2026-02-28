@@ -1,17 +1,15 @@
-import { useState } from "react";
 import {
   Box,
   Button,
   Card,
+  CardActionArea,
   CardContent,
   CircularProgress,
   Chip,
-  Divider,
   IconButton,
   List,
-  ListItem,
   ListItemText,
-  ListItemSecondaryAction,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
@@ -21,7 +19,11 @@ import { useGetProjects } from "../hooks/useGetProjects";
 import { useDeleteProject } from "../hooks/useCreateProject";
 import { MODEL_LABELS } from "../constants";
 
-export default function ProjectList({ onSelectProject, onCreateNew }) {
+export default function ProjectList({
+  onSelectProject,
+  onOpenProject,
+  onCreateNew,
+}) {
   const { data: projects = [], isLoading, isError } = useGetProjects();
   const { mutate: deleteProject, isPending: isDeleting } = useDeleteProject();
 
@@ -43,7 +45,12 @@ export default function ProjectList({ onSelectProject, onCreateNew }) {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+      <Box
+        display="flex"
+        justifyContent="space-between"
+        alignItems="center"
+        mb={2}
+      >
         <Typography variant="h5" fontWeight={700}>
           Projects
         </Typography>
@@ -68,41 +75,47 @@ export default function ProjectList({ onSelectProject, onCreateNew }) {
         <List disablePadding>
           {projects.map((project) => (
             <Card key={project.id} variant="outlined" sx={{ mb: 1 }}>
-              <ListItem
-                secondaryAction={
-                  <Box>
+              <Box display="flex" alignItems="center">
+                <CardActionArea
+                  onClick={() => onOpenProject(project)}
+                  sx={{ flex: 1, px: 2, py: 1.5 }}
+                >
+                  <ListItemText
+                    primary={
+                      <Typography fontWeight={600}>{project.name}</Typography>
+                    }
+                    secondary={
+                      <Chip
+                        label={MODEL_LABELS[project.model] ?? project.model}
+                        size="small"
+                        variant="outlined"
+                        sx={{ mt: 0.5 }}
+                      />
+                    }
+                  />
+                </CardActionArea>
+                <Box display="flex" alignItems="center" pr={1} gap={0.5}>
+                  <Tooltip title="Open Chat">
                     <IconButton
-                      edge="end"
-                      aria-label="chat"
                       onClick={() => onSelectProject(project)}
                       color="primary"
+                      size="small"
                     >
                       <ChatIcon />
                     </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete">
                     <IconButton
-                      edge="end"
-                      aria-label="delete"
                       onClick={() => deleteProject(project.id)}
                       disabled={isDeleting}
                       color="error"
+                      size="small"
                     >
                       <DeleteIcon />
                     </IconButton>
-                  </Box>
-                }
-              >
-                <ListItemText
-                  primary={project.name}
-                  secondary={
-                    <Chip
-                      label={MODEL_LABELS[project.model] ?? project.model}
-                      size="small"
-                      variant="outlined"
-                      sx={{ mt: 0.5 }}
-                    />
-                  }
-                />
-              </ListItem>
+                  </Tooltip>
+                </Box>
+              </Box>
             </Card>
           ))}
         </List>

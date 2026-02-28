@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import ProjectList from "./components/ProjectList";
 import ProjectForm from "./components/ProjectForm";
+import ProjectDetail from "./components/ProjectDetail";
 import ChatWindow from "./components/ChatWindow";
 
 const theme = createTheme({
@@ -22,9 +23,14 @@ const theme = createTheme({
 });
 
 function App() {
-  const [view, setView] = useState("list"); // "list" | "chat"
+  const [view, setView] = useState("list"); // "list" | "detail" | "chat"
   const [showForm, setShowForm] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
+
+  const handleOpenProject = (project) => {
+    setSelectedProject(project);
+    setView("detail");
+  };
 
   const handleSelectProject = (project) => {
     setSelectedProject(project);
@@ -40,12 +46,18 @@ function App() {
       <CssBaseline />
       <Container
         maxWidth="md"
-        sx={{ py: 4, height: "100vh", display: "flex", flexDirection: "column" }}
+        sx={{
+          py: 4,
+          height: "100vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
       >
         {view === "list" ? (
           <>
             <ProjectList
               onSelectProject={handleSelectProject}
+              onOpenProject={handleOpenProject}
               onCreateNew={() => setShowForm(true)}
             />
             <Dialog
@@ -62,6 +74,12 @@ function App() {
               </DialogContent>
             </Dialog>
           </>
+        ) : view === "detail" ? (
+          <ProjectDetail
+            projectId={selectedProject?.id}
+            onBack={() => setView("list")}
+            onChat={() => setView("chat")}
+          />
         ) : (
           <Paper
             variant="outlined"

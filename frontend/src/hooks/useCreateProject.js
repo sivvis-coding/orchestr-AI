@@ -4,12 +4,16 @@ import { projectsApi } from "../api";
 /**
  * Mutation hook to create a new project.
  */
-export function useCreateProject(options = {}) {
+export function useCreateProject({
+  onSuccess: externalOnSuccess,
+  ...options
+} = {}) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data) => projectsApi.create(data),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      externalOnSuccess?.(data);
     },
     ...options,
   });

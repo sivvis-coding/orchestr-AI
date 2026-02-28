@@ -6,6 +6,7 @@ from google.genai import types as genai_types
 from ..database import get_db
 from ..models import Project, Message
 from ..schemas import ChatRequest, ChatResponse, MessageResponse
+from ..services.rag import retrieve_relevant_chunks
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -15,7 +16,9 @@ def send_message(payload: ChatRequest, db: Session = Depends(get_db)):
     """Send a message to Gemini and persist the exchange."""
     project = db.query(Project).filter(Project.id == payload.project_id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
 
     try:
         client = genai.Client(api_key=project.api_key)
@@ -44,13 +47,34 @@ def send_message(payload: ChatRequest, db: Session = Depends(get_db)):
                 for msg in payload.history
             ]
 
-        # Combine system_prompt and context_data into the system instruction so
-        # context is available for the entire conversation, not just the first turn.
+        # --- RAG: retrieve relevant chunks for this query ---
+        rag_context = ""
+        try:
+            hits = retrieve_relevant_chunks(
+                db=db,
+                project_id=project.id,
+                query=payload.message,
+                top_k=6,
+            )
+            if hits:
+                sections = []
+                for score, chunk in hits:
+                    sections.append(
+                        f"[{chunk.document.filename} — relevance {score:.2f}]\n{chunk.content}"
+                    )
+                rag_context = (
+                    "Relevant information retrieved from project documents:\n\n"
+                    + "\n\n---\n\n".join(sections)
+                )
+        except Exception:
+            pass  # Never let RAG failure break the chat
+        print(rag_context)
+        # Build system instruction
         system_parts = []
         if project.system_prompt:
             system_parts.append(project.system_prompt)
-        if project.context_data:
-            system_parts.append(f"Context:\n{project.context_data}")
+        if rag_context:
+            system_parts.append(rag_context)
         system_instruction = "\n\n".join(system_parts) if system_parts else None
 
         chat = client.chats.create(
@@ -91,7 +115,9 @@ def get_chat_history(project_id: int, db: Session = Depends(get_db)):
     """Return the persisted chat history for a project."""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
     messages = (
         db.query(Message)
         .filter(Message.project_id == project_id)
@@ -106,6 +132,8 @@ def clear_chat_history(project_id: int, db: Session = Depends(get_db)):
     """Delete all messages for a project."""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
     db.query(Message).filter(Message.project_id == project_id).delete()
     db.commit()
