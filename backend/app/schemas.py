@@ -66,11 +66,22 @@ class ChatRequest(BaseModel):
     project_id: int
     message: str = Field(..., min_length=1)
     history: Optional[List[MessageBase]] = []
+    min_score: float = Field(default=0.7, ge=0.0, le=1.0)
+
+
+class SourceReference(BaseModel):
+    document_id: int
+    filename: str
+    chunk_index: int
+    score: float
+    row_index: Optional[int] = None
+    row_key: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
     reply: str
     message: MessageResponse
+    sources: List[SourceReference] = []
 
 
 # ── Document schemas ─────────────────────────────────────────────
@@ -81,6 +92,49 @@ class DocumentResponse(BaseModel):
     project_id: int
     filename: str
     chunk_count: int
+    csv_id_column: Optional[str] = None
+    csv_index_columns: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── CSV structured upload schemas ────────────────────────────────
+
+
+class CsvColumnsResponse(BaseModel):
+    columns: List[str]
+
+
+class CsvUploadConfig(BaseModel):
+    id_column: str
+    index_columns: List[str]
+
+
+# ── Document reindex schema ─────────────────────────────────────
+
+
+class ReindexResponse(BaseModel):
+    reindexed: int
+    skipped_no_content: int
+
+
+# ── RAG debug schemas ────────────────────────────────────────────
+
+
+class RagDebugChunk(BaseModel):
+    score: float
+    filename: str
+    chunk_index: int
+    content: str
+    full_row: Optional[str] = (
+        None  # full SQLite CsvRow text if chunk belongs to a CSV doc
+    )
+
+
+class RagDebugResponse(BaseModel):
+    query: str
+    total_chunks_retrieved: int
+    min_score_threshold: float
+    csv_row_match: Optional[str] = None
+    chunks: List[RagDebugChunk]

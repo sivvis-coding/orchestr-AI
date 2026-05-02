@@ -48,3 +48,14 @@ export function useClearHistory(options = {}) {
     ...options,
   });
 }
+
+/**
+ * Mutation hook to fetch RAG debug info for a given query.
+ * Call mutate({ projectId, query }) to retrieve chunks.
+ */
+export function useRagDebug(options = {}) {
+  return useMutation({
+    mutationFn: ({ projectId, query }) => chatApi.ragDebug(projectId, query),
+    ...options,
+  });
+}

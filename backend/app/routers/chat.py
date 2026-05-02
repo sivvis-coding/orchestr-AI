@@ -1,12 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 import google.genai as genai
 from google.genai import types as genai_types
 
 from ..database import get_db
 from ..models import Project, Message
-from ..schemas import ChatRequest, ChatResponse, MessageResponse
-from ..services.rag import retrieve_relevant_chunks
+from ..schemas import (
+    ChatRequest,
+    ChatResponse,
+    MessageResponse,
+    RagDebugChunk,
+    RagDebugResponse,
+    SourceReference,
+)
+from ..services.rag import retrieve_relevant_chunks, find_csv_row_context
+from ..models import CsvRow as CsvRowModel
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -49,33 +61,104 @@ def send_message(payload: ChatRequest, db: Session = Depends(get_db)):
 
         # --- RAG: retrieve relevant chunks for this query ---
         rag_context = ""
+        hits = []
+        sources: list[SourceReference] = []
         try:
-            hits = retrieve_relevant_chunks(
-                db=db,
-                project_id=project.id,
-                query=payload.message,
-                top_k=6,
+            # 1. Try direct CSV row lookup first (user named a specific record)
+            csv_row_ctx = find_csv_row_context(
+                db=db, project_id=project.id, user_message=payload.message
             )
-            if hits:
-                sections = []
-                for score, chunk in hits:
-                    sections.append(
-                        f"[{chunk.document.filename} — relevance {score:.2f}]\n{chunk.content}"
-                    )
-                rag_context = (
-                    "Relevant information retrieved from project documents:\n\n"
-                    + "\n\n---\n\n".join(sections)
+
+            if csv_row_ctx:
+                # User asked about a specific identifiable record → inject full data
+                rag_context = csv_row_ctx
+            else:
+                # 2. Semantic search with user-controlled threshold
+                hits = retrieve_relevant_chunks(
+                    db=db,
+                    project_id=project.id,
+                    query=payload.message,
+                    top_k=20,
+                    min_score=payload.min_score,
                 )
-        except Exception:
-            pass  # Never let RAG failure break the chat
-        print(rag_context)
+                if hits:
+                    sections = []
+                    for score, chunk in hits:
+                        # For CSV chunks, load the full row data
+                        content_to_inject = chunk.content
+                        row_key = None
+                        if chunk.row_index is not None:
+                            csv_row = (
+                                db.query(CsvRowModel)
+                                .filter(
+                                    CsvRowModel.document_id == chunk.document_id,
+                                    CsvRowModel.row_index == chunk.row_index,
+                                )
+                                .first()
+                            )
+                            if csv_row:
+                                content_to_inject = csv_row.full_text
+                                row_key = csv_row.row_key
+
+                        sections.append(
+                            f"[{chunk.document.filename} — relevance {score:.2f}]\n{content_to_inject}"
+                        )
+                        sources.append(
+                            SourceReference(
+                                document_id=chunk.document_id,
+                                filename=chunk.document.filename,
+                                chunk_index=chunk.chunk_index,
+                                score=round(score, 4),
+                                row_index=chunk.row_index,
+                                row_key=row_key,
+                            )
+                        )
+
+                    rag_context = (
+                        "Relevant information retrieved from project documents. "
+                        "Use ALL provided context to write a comprehensive summary "
+                        "answering the user's question:\n\n"
+                        + "\n\n---\n\n".join(sections)
+                    )
+        except Exception as rag_exc:
+            logger.warning("RAG retrieval failed: %s", rag_exc)
+
+        if hits:
+            logger.debug(
+                "RAG | project=%s query=%r hits=%d min_score=%.2f",
+                project.id,
+                payload.message,
+                len(hits),
+                payload.min_score,
+            )
+            for _score, _chunk in hits:
+                logger.debug(
+                    "  score=%.3f  file=%s  chunk#%d  text=%r",
+                    _score,
+                    _chunk.document.filename,
+                    _chunk.chunk_index,
+                    _chunk.content[:120],
+                )
+        else:
+            logger.debug(
+                "RAG | project=%s query=%r — no chunks above threshold (%.2f)",
+                project.id,
+                payload.message,
+                payload.min_score,
+            )
+
         # Build system instruction
-        system_parts = []
+        MARKDOWN_INSTRUCTION = (
+            "Always format your responses using Markdown. "
+            "Use headings, bullet lists, bold, tables, and code blocks where appropriate. "
+            "Reports and structured information must always be presented in Markdown."
+        )
+        system_parts = [MARKDOWN_INSTRUCTION]
         if project.system_prompt:
             system_parts.append(project.system_prompt)
         if rag_context:
             system_parts.append(rag_context)
-        system_instruction = "\n\n".join(system_parts) if system_parts else None
+        system_instruction = "\n\n".join(system_parts)
 
         chat = client.chats.create(
             model=project.model,
@@ -89,6 +172,12 @@ def send_message(payload: ChatRequest, db: Session = Depends(get_db)):
         reply_text = response.text
 
     except Exception as exc:
+        exc_str = str(exc)
+        if "429" in exc_str or "quota" in exc_str.lower() or "rate" in exc_str.lower():
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Gemini API rate limit exceeded. Wait a moment and try again.",
+            )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Gemini API error: {exc}",
@@ -107,6 +196,68 @@ def send_message(payload: ChatRequest, db: Session = Depends(get_db)):
     return ChatResponse(
         reply=reply_text,
         message=MessageResponse.model_validate(model_msg),
+        sources=sources,
+    )
+
+
+@router.get("/{project_id}/rag-debug", response_model=RagDebugResponse)
+def rag_debug(
+    project_id: int,
+    query: str = Query(
+        ..., min_length=1, description="Query to test against the RAG index"
+    ),
+    top_k: int = Query(default=20, ge=1, le=50),
+    min_score: float = Query(default=0.20, ge=0.0, le=1.0),
+    db: Session = Depends(get_db),
+):
+    """Debug endpoint: returns the raw RAG chunks that would be injected into the LLM context."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+
+    hits = retrieve_relevant_chunks(
+        db=db,
+        project_id=project_id,
+        query=query,
+        top_k=top_k,
+        min_score=min_score,
+    )
+
+    csv_match = find_csv_row_context(db=db, project_id=project_id, user_message=query)
+
+    chunk_results = []
+    for score, chunk in hits:
+        # Look up the full SQLite row if this chunk came from a structured CSV
+        full_row = None
+        if chunk.row_index is not None:
+            csv_row = (
+                db.query(CsvRowModel)
+                .filter(
+                    CsvRowModel.document_id == chunk.document_id,
+                    CsvRowModel.row_index == chunk.row_index,
+                )
+                .first()
+            )
+            if csv_row:
+                full_row = csv_row.full_text
+        chunk_results.append(
+            RagDebugChunk(
+                score=round(score, 4),
+                filename=chunk.document.filename,
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                full_row=full_row,
+            )
+        )
+
+    return RagDebugResponse(
+        query=query,
+        total_chunks_retrieved=len(hits),
+        min_score_threshold=min_score,
+        csv_row_match=csv_match if csv_match else None,
+        chunks=chunk_results,
     )
 
 

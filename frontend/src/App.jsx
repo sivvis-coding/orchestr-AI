@@ -45,7 +45,7 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Container
-        maxWidth="md"
+        maxWidth="xl"
         sx={{
           py: 4,
           height: "100vh",
