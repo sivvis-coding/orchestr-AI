@@ -22,14 +22,16 @@ export function useGetChatHistory(projectId, options = {}) {
  */
 export function useSendMessage(options = {}) {
   const queryClient = useQueryClient();
+  const { onSuccess: callerOnSuccess, ...restOptions } = options;
   return useMutation({
     mutationFn: (data) => chatApi.sendMessage(data),
-    onSuccess: (_, variables) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({
         queryKey: ["chat", variables.project_id, "history"],
       });
+      callerOnSuccess?.(data, variables);
     },
-    ...options,
+    ...restOptions,
   });
 }
 
@@ -51,11 +53,12 @@ export function useClearHistory(options = {}) {
 
 /**
  * Mutation hook to fetch RAG debug info for a given query.
- * Call mutate({ projectId, query }) to retrieve chunks.
+ * Call mutate({ projectId, query, minScore }) to retrieve chunks.
  */
 export function useRagDebug(options = {}) {
   return useMutation({
-    mutationFn: ({ projectId, query }) => chatApi.ragDebug(projectId, query),
+    mutationFn: ({ projectId, query, minScore }) =>
+      chatApi.ragDebug(projectId, query, 20, minScore),
     ...options,
   });
 }

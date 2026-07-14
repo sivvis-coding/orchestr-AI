@@ -85,7 +85,7 @@ export default function ChatWindow({ project, onBack }) {
 
   const handleTestRagOnly = () => {
     if (!input.trim() || isDebugging) return;
-    fetchRagDebug({ projectId: project.id, query: input.trim() });
+    fetchRagDebug({ projectId: project.id, query: input.trim(), minScore });
   };
 
   const handleKeyDown = (e) => {
@@ -260,7 +260,7 @@ export default function ChatWindow({ project, onBack }) {
               )}
             </Box>
             {/* Standalone RAG query — does NOT call Gemini */}
-            <RagQueryInput projectId={project.id} onResult={setRagData} />
+            <RagQueryInput projectId={project.id} onResult={setRagData} minScore={minScore} />
           </Box>
 
           <Box flexGrow={1} overflow="auto" p={1.5}>
@@ -292,7 +292,7 @@ export default function ChatWindow({ project, onBack }) {
   );
 }
 
-function RagQueryInput({ projectId, onResult }) {
+function RagQueryInput({ projectId, onResult, minScore }) {
   const [query, setQuery] = useState("");
   const { mutate: fetchRag, isPending } = useRagDebug({
     onSuccess: onResult,
@@ -300,7 +300,7 @@ function RagQueryInput({ projectId, onResult }) {
 
   const handleTest = () => {
     if (!query.trim() || isPending) return;
-    fetchRag({ projectId, query: query.trim() });
+    fetchRag({ projectId, query: query.trim(), minScore });
   };
 
   return (

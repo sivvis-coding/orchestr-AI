@@ -114,12 +114,7 @@ def send_message(payload: ChatRequest, db: Session = Depends(get_db)):
                             )
                         )
 
-                    rag_context = (
-                        "Relevant information retrieved from project documents. "
-                        "Use ALL provided context to write a comprehensive summary "
-                        "answering the user's question:\n\n"
-                        + "\n\n---\n\n".join(sections)
-                    )
+                    rag_context = "\n\n---\n\n".join(sections)
         except Exception as rag_exc:
             logger.warning("RAG retrieval failed: %s", rag_exc)
 
@@ -153,11 +148,27 @@ def send_message(payload: ChatRequest, db: Session = Depends(get_db)):
             "Use headings, bullet lists, bold, tables, and code blocks where appropriate. "
             "Reports and structured information must always be presented in Markdown."
         )
-        system_parts = [MARKDOWN_INSTRUCTION]
-        if project.system_prompt:
-            system_parts.append(project.system_prompt)
+
         if rag_context:
-            system_parts.append(rag_context)
+            # When RAG data is available, ground the model STRICTLY
+            GROUNDING_RULE = (
+                "REGLA ABSOLUTA: Eres un asistente que SOLO responde con información "
+                "de la base de datos interna del proyecto. "
+                "PROHIBIDO usar tu conocimiento general o entrenamiento. "
+                "PROHIBIDO inventar o complementar con fuentes externas. "
+                "Si la información recuperada no es suficiente, responde: "
+                "'No tengo suficiente información en la base de datos para responder esto.'\n"
+                "Tu ÚNICA fuente de datos es la sección 'DATOS RECUPERADOS' que aparece abajo."
+            )
+            system_parts = [GROUNDING_RULE, MARKDOWN_INSTRUCTION]
+            if project.system_prompt:
+                system_parts.append(project.system_prompt)
+            system_parts.append(f"--- DATOS RECUPERADOS ---\n{rag_context}")
+        else:
+            system_parts = [MARKDOWN_INSTRUCTION]
+            if project.system_prompt:
+                system_parts.append(project.system_prompt)
+
         system_instruction = "\n\n".join(system_parts)
 
         chat = client.chats.create(
